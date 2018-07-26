@@ -1,0 +1,28 @@
+---
+title: "Productivity Tools Course"
+output:
+  html_notebook:
+    theme: spacelab
+    toc: yes
+    toc_depth: 4
+    toc_float:
+      collapsed: yes
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: 3
+    toc_float:
+      collapsed: yes
+---
+
+##Using Unix
+
+###The Terminal
+
+Access a terminal window in R via Tools > Terminal > New Terminal.
+
+The following function can be run in the terminal screen which returns the string in quotes:
+
+`echo "hello world"`
+*hello world*
+
