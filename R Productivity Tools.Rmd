@@ -24,5 +24,64 @@ Access a terminal window in R via Tools > Terminal > New Terminal.
 The following function can be run in the terminal screen which returns the string in quotes:
 
 `echo "hello world"`
+
 *hello world*
+
+###Recommended Directory Structure
+
+![](Directory Structure.png) 
+
+
+###Unix Commands
+
+**Working Directory**  
+
+* `pwd` prints the *full path* current working directory  
+* `~` is a shorthand for within the current directory (e.g. `~/docs` in your working directory)
+    + `cd ~/docs` will take us to `docs` no matter where it is relative to the current directory
+* `ls` lists directory content  
+* `mkdir` creates a new directory within the current working directory  
+* `rmdir` removes a directory as long as it's empty
+* `cd` changes the working directory to the directory specified after it (e.g. `cd projects`) 
+    + `cd ~` returns you to the root (first parent) directory  
+    + `cd ..` returns you to the parent directory one step above the working directory  
+    + `cd .` keeps you in the current directory (`.` is a shorthand for the current directory)
+    + `cd ../..` will take you to the parent of the parent of the working directory!
+    + `cd -` returns you to the directory you just left
+    + `cd` alone also returns you to the home directory
+    + note: be sure to but `/` at the end of the directory you want to move to!
+    
+**Adding, Moving and Looking at Files**
+
+* `mv` moves files or directories between directories as well as changing filenames  
+    + e.g. `mv ~/docs/resumes/cv.tex ~/docs/reports/` moves `cv.tex` from `resumes` to `reports`
+    + e.g. once in the working directory, `mv cv.tex resume.tex` changes the filename
+    + note: to move a directory or file, ensure that there is a `/` at the end of your                 destination else the filename will change!
+    + note: `mv` will replace a file without warning if you move a new one of the same name to         the same directory
+* `cp` copies files into other directories with the same syntax as `mv`  
+    + note: `cp` cannot copy directories without an argument  
+* `rm` *permanently* removes files
+    + note: one can list multiple files to remove simulataneously
+    + note: to remove a directory requires an argment
+* `less` shows the contents of a file
+    + `q` exits the file viewer
+    
+**Preparing for a Data Science Project**
+
+* Create all of the directories you need first
+    + note: This is much easier than reorganizing after the fact!
+
+
+    
+    
+
+
+
+
+
+
+
+
+
+
 
