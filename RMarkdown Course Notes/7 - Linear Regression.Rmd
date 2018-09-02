@@ -1,0 +1,1344 @@
+---
+title: "Linear Regression Course"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
+  html_notebook:
+    theme: spacelab
+    toc: yes
+    toc_depth: 4
+    toc_float:
+      collapsed: yes
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: 3
+    toc_float:
+      collapsed: yes
+---
+
+#Introduction
+```{r, message=FALSE, echo=FALSE, include=FALSE}
+require(HistData)
+require(tidyverse)
+library(Lahman)
+```
+
+
+
+In this course, we discuss the statistical concepts underlying the quantification of relationships between variables in multivariate datasets using linear regression. We will also examine confounding, where extraneous variables affect the relationship between other variables, creating spurious associations.
+
+#Regression
+
+##Case Study: Heredity 
+
+We'll start off with the dataset used by the inventor of the regression method, Francis Galton. He was trying to understand to what degree the heights of fathers predicted the heights of their sons -- i.e. to what extend height is hereditary. The dataset is available in the `HistData` package.
+
+```{r, message = FALSE, warning = FALSE}
+data("GaltonFamilies") 
+galton_heights <- GaltonFamilies %>%
+  filter(childNum == 1 & gender == "male") %>% 
+  select(father, childHeight) %>%
+  rename(son = childHeight)
+```
+
+We'll come back to this dataset to demonstrate the application of regression methods.
+
+##Correlation and the Regression Line
+
+Two variables are said to be correlated if the change in one coincides with a commensurate change in the other, either directly or inversely. The correlation coefficient describes how much variability in one variable is explained by the other. 
+
+The correlation coefficient is defined for a list of pairs $(x_1, y_1), \dots, (x_n,y_n)$ as:
+
+$$
+\rho = \frac{1}{n} \sum_{i=1}^n \left( \frac{x_i-\mu_x}{\sigma_x} \right)\left( \frac{y_i-\mu_y}{\sigma_y} \right)
+$$
+with $\mu_x, \mu_y$ the averages of $x_1,\dots, x_n$ and $y_1, \dots, y_n$ respectively and $\sigma_x, \sigma_y$ the standard deviations.
+
+Note that each of the terms being summed above represent the number of standard deviations that the *ith* $x$ or $y$ is from the mean. If $x$ and $y$ are unrelated, then the product will be positive as often as negative, and the sum will be about zero. If the variables are related, then the relation will be more often positive or negative, and $\rho$ (Greek for $r$) will be larger in magnitude.
+
+The correlation coefficient, $\rho$, is always between -1 and 1. 
+
+```{r}
+galton_heights %>% summarize(r = cor(father, son))
+```
+
+As you can see, the correlation between fathers' heights and that of their sons is about 0.2.
+
+###Sample Correlation is a Random Variable
+
+We generally use the sample correlation as an estimate of the population correlation. The correlation coefficient between random samples of a population is a random variable, which we can illustrate with the following example.
+
+Assume that the 26 pairs of fathers and sons represents our entire population, and we sample 25 of them. Let's simulate how the correlation would be distributed.
+
+```{r}
+#set number of replications
+B <- 1000
+#set sample size
+N <- 25
+#compute correlation coefficient for each sample
+R <- replicate(B, {
+sample_n(galton_heights, N, replace = TRUE) %>% summarize(r=cor(father, son)) %>% .$r
+})
+#plot histogram
+data.frame(R) %>% ggplot(aes(R)) + geom_histogram(binwidth = 0.05, color = "black")
+```
+
+The mean of the sample correlation coefficients is the mean of the population:
+
+```{r}
+mean(R)
+```
+And has a relatively high standard error:
+
+```{r}
+sd(R)
+```
+
+Since R is a random variable, the CLT applies. With a large enough N, R is normally distributed with expected value $\rho$. The theoretical standard deviation of the (sample) correlation coefficient, $r$, is:
+
+$$SD(r) = \sqrt{\frac{1-r^2}{N-2}}$$
+
+Plotting the sample coefficients above in a qq-plot indicates that 25 samples is not enough to reliably distribute normally. (Note that in a qq-plot the intercept of the normal line is at the mean and the slope is the standard deviation.)
+
+```{r}
+data.frame(R) %>% 
+  ggplot(aes(sample=R)) + 
+  stat_qq() + 
+  geom_abline(intercept = mean(R), 
+              slope = sqrt((1-mean(R)^2)/(N-2)))
+```
+
+Increasing N would make the above plot converge to the normal line.
+
+###Using Correlation Appropriately
+
+Correlation coefficients can be misleading. Check out these canonical examples, known as Anscombe's quartet, which illustrate this point. All of the following plots have correlation coefficient $r = 0.82$.
+
+```{r}
+anscombe %>% mutate(row = seq_len(n())) %>%
+  gather(name, value, -row) %>% 
+  separate(name, c("axis", "group"), sep=1) %>%
+  spread(axis, value) %>% select(-row) %>%
+  ggplot(aes(x,y)) +
+  facet_wrap(~group)  +
+  geom_smooth(method="lm", fill=NA, fullrange=TRUE, color="blue") +
+  geom_point(bg="orange",color="red",cex=3,pch=21)
+```
+
+Correlation is only meaningful in a particular context. To see how and when correlation is useful, let's return to predicting the sons' heights based on their fathers'.
+
+###Prediction based on Stratification
+
+If we wanted to predict the height of one of the sons given that his father's height is 72 inches, would we guess the average of all of the sons heights? Probably not. Ideally, we'd find out the heights of the sons of many fathers who were 72 inches tall and guess the average of their sons' heights. That sample would be normally distributed, and is known as a *conditional distribution*. 
+
+If we stratify the sons' heights based on the fathers' heights (rounding to the nearest inch), we see that the average of sons' heights increases as the father's height increases.
+
+```{r}
+galton_heights %>% mutate(father = round(father)) %>% group_by(father) %>% summarize(son_conditional_avg = mean(son)) %>% ggplot(aes(father, son_conditional_avg)) + geom_point()
+```
+Taking into account that these averages are random variables with standard errors, we can see that they follow a straight line once scaled.
+
+```{r}
+r <- galton_heights %>% summarize(r = cor(father, son)) %>% .$r 
+galton_heights %>%
+mutate(father = round(father)) %>%
+group_by(father) %>%
+summarize(son = mean(son)) %>%
+mutate(z_father = scale(father), z_son = scale(son)) %>% ggplot(aes(z_father, z_son)) +
+geom_point() +
+geom_abline(intercept = 0, slope = r)
+```
+
+The line these averages follow is known as the *regression line*.
+
+###The Regression Line
+
+If we are predicting a random variable $Y$ knowing the value of another $X=x$ using a regression line, then we predict that for every standard deviation, $\sigma_X$, that $x$ increases above the average $mu_X$, $Y$ increase $\rho$ standard deviations $\sigma_Y$ above the average $\mu_Y$ with $\rho$ the correlation between $X$ and $Y$. The formula for the regression is therefore:
+
+$$ 
+\left( \frac{Y-\mu_Y}{\sigma_Y} \right) = \rho \left( \frac{x-\mu_X}{\sigma_X} \right)
+$$
+Rewritten into a $y = mx + b$ form:
+$$ 
+Y = \mu_Y + \rho \left( \frac{x-\mu_X}{\sigma_X} \right) \sigma_Y
+$$
+
+If there is a perfect correlation, we predict that an increase of 1 SD in x will be matched with an incrase of 1 SD in Y. If there is no correlation, $\rho$ is 0 and we just use the mean to predict Y.
+
+In general regression lines are constructed as follows:
+
+
+$$
+y= b + mx \mbox{ with slope } m = \rho \frac{\sigma_y}{\sigma_x} \mbox{ and intercept } b=\mu_y - m \mu_x
+$$
+You can add the regression line to the original data as follows:
+
+```{r}
+mu_x <- mean(galton_heights$father) 
+mu_y <- mean(galton_heights$son) 
+s_x <- sd(galton_heights$father) 
+s_y <- sd(galton_heights$son)
+r <- cor(galton_heights$father, galton_heights$son)
+m<- r*s_y/s_x #plug into the above equation for slope
+b <- mu_y - m*mu_x #plug into the above equation for intercept
+galton_heights %>%
+ggplot(aes(father, son)) + geom_point(alpha = 0.5) + geom_abline(intercept = b, slope = m )
+```
+A simpler method is to first standardize the two variables, making the intercept 0 and the slope $r$. 
+
+```{r}
+galton_heights %>% 
+  ggplot(aes(scale(father), scale(son))) + 
+  geom_point(alpha = 0.5) +
+  geom_abline(intercept = 0, slope = r)                        
+```
+
+###The Regression Line Improves Precision
+
+Let's compare the stratification and regression approaches:
+
+1. Round father's inches to closest inch, stratify, and take the average
+2. Compute the regression line and use it to predict
+
+```{r}
+B <- 1000
+N <- 50
+
+set.seed(1)
+conditional_avg <- replicate(B, {
+  dat <- sample_n(galton_heights, N, replace = TRUE)
+  dat %>% filter(round(father) == 72) %>% 
+    summarize(avg = mean(son)) %>% 
+    .$avg
+  })
+
+regression_prediction <- replicate(B, {
+  dat <- sample_n(galton_heights, N, replace = TRUE)
+  mu_x <- mean(dat$father)
+  mu_y <- mean(dat$son)
+  s_x <- sd(dat$father)
+  s_y <- sd(dat$son)
+  r <- cor(dat$father, dat$son)
+  
+  mu_y + r*(72 - mu_x)/s_x*s_y
+})
+```
+
+The mean of each method's output is about the same, but the regression method produces a lower standard error, and is thus more precise.
+
+```{r}
+data.frame(Mean_Conditional_Average = mean(conditional_avg, na.rm = TRUE), 
+           Mean_Regression = mean(regression_prediction))
+```
+```{r}
+data.frame(SD_Conditional_Average = sd(conditional_avg, na.rm = TRUE),
+      SD_Regression = sd(regression_prediction))
+```
+
+The regression line is more precise because it uses all of the data for every prediction, rather than a small subset. However, it is not always appropriate, since two variables may have a relationship that is nonlinear.
+
+Galton showed that heights are in fact linearly correlated, and that the correlation coefficient is thus an appropriate measure of their relationship.
+
+###The Bivariate Normal Distribution
+
+The *bivariate normal distribution* describes normal behavior between two variables: if $X$ and $Y$ are normally distributed random variables, and for any stratum of $X$, say $X=x$, $Y$ is approximately normal in that stratum, then the pair is approximately bivariate normal. 
+
+When we fix $X=x$ in this way, we then refer to the resulting distribution of the $Y$s in the strata as the _conditional distribution_ of $Y$ given $X=x$. We can write it using mathematical notation like this:
+
+$$\mbox{conditional distribution: } f_{Y \mid X=x} $$
+$$\mbox{conditional expected value: }{E}(Y \mid X=x)$$
+In graphical form, the correlation coefficient corresponds to how slim the oval is:
+```{r}
+n <- 250
+cors <- c(-0.9,-0.5,0,0.5,0.9,0.99)
+sim_data <- lapply(cors,function(r) MASS::mvrnorm(n,c(0,0), matrix(c(1,r,r,1),2,2)))
+sim_data <- Reduce(rbind, sim_data)
+sim_data <- cbind( rep(cors, each=n), sim_data)
+colnames(sim_data) <- c("r","x","y")
+as.data.frame(sim_data) %>% ggplot(aes(x,y)) +
+  facet_wrap(~r) + geom_point() +
+  geom_vline(xintercept = 0,lty=2) + 
+  geom_hline(yintercept = 0,lty=2)
+```
+
+If a dataset is normally bivariate, we should expect to see a normal distribution in $Y$ for all strata of $X$. Below we can see that this seems to hold for the `galton_heights` dataset.
+
+```{r qqnorm-of-strata, fig.cap="qqplots of son heights for four strata defined by father heights.",fig.width=7.5,fig.height=7.5}
+galton_heights %>%
+  mutate(z_father = round((father - mean(father))/sd(father))) %>%
+  filter(z_father %in% -2:2) %>%
+  ggplot() +  
+  stat_qq(aes(sample=son)) +
+  facet_wrap(~z_father) 
+```
+
+When two variables follow the bivariate normal distribution, computing the regression line is equivalent to computing conditional expectations.
+
+$$ 
+\mbox{E}(Y | X=x) = \mu_Y +  \rho \frac{X-\mu_X}{\sigma_X}\sigma_Y
+$$
+
+In summary, if our data is approximately bivariate, then the conditional expectation, the best prediction of $Y$ given we know the value of $X$, is given by the regression line.
+
+**Variance Explained**
+
+The bivariate normal theory also tells us that the standard deviation of the _conditional_ distribution described above is:
+
+$$
+\mbox{SD}(Y \mid X=x ) = \sigma_Y \sqrt{1-\rho^2} 
+$$
+Specifically, it is reduced to $\sqrt{1-\rho^2} = \sqrt{1 - 0.25}$ = 0.86 of what it was originally. We could say that the fathers height "explains" 14% of the sons height variability. 
+
+The statement $X$ explains such and such percent of the variability is commonly used in academic papers. In this case, this percent actually refers to the variance (the SD squared). So if the data is bivariate normal, the variance is reduced by $1-\rho^2$ so we say that $X$ explains $1- (1-\rho^2)=\rho^2$ (the correlation squared) of the variance. 
+
+Note: the "variance explained" statement only makes sense when the data is approximated by a *bivariate normal distribution*.
+
+**The Other Regression Line**
+
+We could also compute the regression line to predict the father's height based on their sons'. 
+
+```{r}
+mu_x <- mean(galton_heights$father)
+mu_y <- mean(galton_heights$son)
+s_x <- sd(galton_heights$father)
+s_y <- sd(galton_heights$son)
+r <- cor(galton_heights$father, galton_heights$son)
+m_1 <-  r * s_y / s_x
+b_1 <- mu_y - m_1*mu_x
+m_2 <-  r * s_x / s_y
+b_2 <- mu_x - m_2*mu_y
+```
+Note that the second regression line is not the inverse of the first. Rather it is a function of recomputed conditional probabilities.
+
+```{r heights, fig.cap= "Regression Lines for Heights of Fathers to Predict Son's and Vice Versa"}
+galton_heights %>% 
+  ggplot(aes(father, son)) + 
+  geom_point(alpha = 0.5) + 
+  geom_abline(intercept = b_1, slope = m_1, col = "blue") +
+  geom_abline(intercept = -b_2/m_2, slope = 1/m_2, col = "red") 
+```
+
+##Introduction to Linear Models
+
+###Linear Models
+
+**Confounding**
+
+> A guiding principle for all linear regression analysis: *correlation is not causation*.
+
+As an illustrative example, the classical statistic measuring professional baseball players' offensive ability is the batting average, or BA. The BA captures how often a player gets hit per at-bat. As famously discussed in Michael Lewis' *Moneyball*, it does not include the frequency with which a player gets on base after being walked, aka "bases on balls", or BBs. 
+
+We can see from the regression slope below that BBs are correlated with more runs per game.
+
+```{r}
+bb_slope <- Teams %>% 
+  filter(yearID %in% 1961:2001 ) %>% 
+  mutate(BB_per_game = BB/G, R_per_game = R/G) %>% 
+  lm(R_per_game ~ BB_per_game, data = .) %>% 
+  .$coef  %>% 
+  .[2] 
+bb_slope 
+```
+
+However, as we can see below, the correlation between BB and runs is stronger than the one between singles and runs, even though they have the same outcome (a player on first base). What explains this?
+
+```{r}
+Teams %>% 
+  filter(yearID %in% 1961:2001 ) %>% 
+  mutate(Singles = (H-HR-X2B-X3B)/G, BB = BB/G, HR = HR/G, 
+         Runs = R/G) %>%  
+  summarize(cor(BB, Runs), cor(Singles, Runs), cor(BB, HR), cor(Singles, HR), cor(BB,Singles))
+```
+It turns out that BBs are also strongly correlated with HRs, since pitchers will sometimes avoid throwing strikes to known HR hitters. Unsurprisingly, HRs also strongly predict overall runs, so we can say that the correlation between BBs and runs is confounded by the third variable, HRs, which partially explains both.
+
+**Stratification and Multivariate Regression**
+
+We can control for the effect of HRs by comparing BBs to Runs within strata where HRs are fixed. 
+
+```{r}
+dat <- Teams %>% filter(yearID %in% 1961:2001) %>%
+  mutate(HR_strata = round(HR/G,1), #create strata by rounding to one decimal point
+         BB_per_game = BB/G,
+         R_per_game = R/G) %>%
+  filter(HR_strata >= 0.4 & HR_strata <=1.2) #filter outliers
+dat %>% 
+  ggplot(aes(BB_per_game, R_per_game)) +  #create scatterplot with regression line
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm") +
+  facet_wrap(~HR_strata) #create scatterplot for each stratum
+```
+We can see that the correlations (and thus the slopes) of the lines are substantially reduced once HRs are fixed. The table below shows the slopes of the above graph.
+
+```{r}
+dat %>%  
+  group_by(HR_strata) %>%
+  summarize(slope = cor(BB_per_game, R_per_game)*sd(R_per_game)/sd(BB_per_game))
+```
+
+We see the slopes are about the same as for singles (~0.5), which makes sense given that they both leave a runner on first base. If we were to switch the variables in the graphs above such that BBs were fixed and HRs were on the x-axis, the correlation between HRs and Runs would be about the same.
+
+Incidentally, each of the variable pairs follows an approximately normal distribution, which means that we can use regression to make predictions. 
+
+**Multiple Regression**
+
+Finding regression lines for each stratum can be expressed as follows:
+
+$$
+\mbox{E}[R \mid BB = x_1, HR = x_2] = \beta_0 + \beta_1(x_2) x_1 + \beta_2(x_1) x_2
+$$
+Here, the slope of $\beta_1$ and $\beta_2$ changing depending on the value of BB and HR. However, when we take random variability into account, the slopes in each of the graphs don't change much. If they are in fact the same, we can create a much simpler model where we treat $\beta_1$ and $\beta_2$ as constants:
+
+$$
+\mbox{E}[R \mid BB = x_1, HR = x_2] = \beta_0 + \beta_1 x_1 + \beta_2 x_2
+$$
+This model implies that if the number of home runs is fixed, we observe a *linear relationship* between runs and BBs, and that the slope of the regression line does *not* depend on the number of home runs. In this multivariate analysis, the BB slope is said to be *adjusted* for the HR effect. 
+
+But how do we estimate $\beta_1$ and $\beta_2$ from the data? For that, we need least squares estimates. 
+
+**Linear Models**
+
+Before we go into a least squares estimates, a quick primer on linear models: It is common to presume as we have above that the variable pairs are bivariate normal and that the strength of thecorrelation between two variables does not depend a third. A linear model refers to a linear combination of variables, so $\beta_0 + \beta_1 x_1 + \beta_2 x_2$ is a linear combination of $x_1$ and $x_2$. 
+
+>Key to remember: if your data is bivariate normal, the linear model holds. 
+
+For Galton's data, we can write the model for predicting sons' heights from their fathers' as follows: 
+
+$$ 
+Y_i = \beta_0 + \beta_1 x_i + \varepsilon_i, \, i=1,\dots,N 
+$$
+Here, $Y_i$ represents the predicted son's height, $\beta_0 + \beta_1 x_1$ represents the intercept and effect of the father's height, and $\varepsilon_i$ represents the error (which we assume is normally distributed with expected value zero). We 
+
+
+
+To make the intercept more interpretable, we can center the fathers' heights so that the intercept represents the predicted height of the son of father of mean height (i.e. $\beta_0$ would be the height when $x_i = \bar{x}$). 
+
+$$ 
+Y_i = \beta_0 + \beta_1 (x_i - \bar{x}) + \varepsilon_i, \, i=1,\dots,N 
+$$
+**Least Squares Estimate**
+
+To make our model useful, we estimate the unknown $\beta$s with the residual sum of squares (RSS) equation:
+
+$$ 
+RSS = \sum_{i=1}^n \left\{  Y_i - \left(\beta_0 + \beta_1 x_i \right)\right\}^2 
+$$
+
+This function gives us the sum of the squared error of the prediction for a given set of $\beta$s. The set of $\beta$s that minimizes the RSS is the least squares estimate, which we then use to make predictions with our model.
+
+Let's write a function to find the residual least squares for the Galton data given a set of $\beta$s:
+
+```{r}
+rss <- function(beta0, beta1, data){
+  resid <- galton_heights$son - (beta0+beta1*galton_heights$father)
+  return(sum(resid^2))
+}
+```
+
+To find the minimum (LSE), we could create a 3D plot with the betas on the x and y axis and RSS on the z. More simply, the following shows what the plot looks like in 2 dimensions when $\beta_0$ is set to 25. 
+
+```{r rss-versus-estimate, fig.cap="Residual sum of squares obtained for several values of the parameters."}
+beta1 = seq(0, 1, len=nrow(galton_heights))
+results <- data.frame(beta1 = beta1,
+                      rss = sapply(beta1, rss, beta0 = 25))
+results %>% ggplot(aes(beta1, rss)) + geom_line() + 
+  geom_line(aes(beta1, rss), col=2)
+```
+Of course, the minimum (around 0.65) doesn't account for any of the other $\beta_0$s. To find the true LSE, we would need to take the partial derivatives of each $\beta$ and solve. This is outside the scope of this series, but we will learn the functions that calculate this in R.
+
+**The Lm Function**
+
+To find the LSEs for our galton data model, we use the `lm` function.
+
+To fit the following model,
+
+$$
+Y_i = \beta_0 + \beta_1 x_i + \varepsilon_i
+$$
+
+```{r}
+fit <- lm(son ~ father, data = galton_heights)
+fit
+```
+The `lm` function predicts the variable to the left of the tilda based on the one(s) to the right. With `summary`, we can extract more information about the fitted model.
+
+```{r}
+summary(fit)
+```
+
+```{r}
+library(Lahman)
+data("LahmanData")
+dat <- Teams %>% filter(yearID %in% 1961:2001) %>%
+  mutate(HR_per_game = HR/G, 
+         BB_per_game = BB/G, 
+         Runs_per_game = R/G)
+fit2 <- lm(Runs_per_game ~ HR_per_game + BB_per_game, data = dat)
+summary(fit2)
+```
+
+**LSEs are random variables**
+
+The LSE are derived from the data $Y_1,\dots,Y_N$, which are random. Thus, our estimates are random variables. Ee can run a Monte Carlo simulation in which we assume the son and father height data defines a population, take a random sample of size $N=50$ and compute the regression slope coefficient for each one:
+
+```{r}
+B <- 1000
+N <- 50
+lse <- replicate(B, {
+  sample_n(galton_heights, N, replace = TRUE) %>% 
+   lm(son ~ father, data = .) %>% .$coef 
+})
+lse <- data.frame(beta_0 = lse[1,], beta_1 = lse[2,]) 
+```
+
+We can see the variability of the estimates by plotting their distributions:
+
+```{r}
+library(gridExtra)
+p1 <- lse %>% ggplot(aes(beta_0)) + geom_histogram(binwidth = 5, color = "black") 
+p2 <- lse %>% ggplot(aes(beta_1)) + geom_histogram(binwidth = 0.1, color = "black") 
+grid.arrange(p1, p2, ncol = 2)
+```
+
+Because the CLT applies, the least squares estimates will be approximately normal with expected value $\beta_0$ and $\beta_1$ respectively. The standard error of these results is provided as well.
+
+```{r}
+ sample_n(galton_heights, N, replace = TRUE) %>% 
+   lm(son ~ father, data = .) %>% summary
+```
+We can see that the standard error from the summary is similar to the simulated error for both $\beta$s.
+```{r}
+lse %>% summarize(se_0 = sd(beta_0), se_1 = sd(beta_1))
+```
+
+If you assume that N is large enough to use the CLT or that the errors are normal (and use the t-distribution), you can construct confidence intervals. The t-statistic in the `lm` summary uses the latter assumption. Namely, the LSE divided by their standard error, $\hat{\beta}_0 / \hat{\mbox{SE}}(\hat{\beta}_0 )$ and $\hat{\beta}_1 / \hat{\mbox{SE}}(\hat{\beta}_1 )$ follow a t-distribution with $N-p$ degrees of freedom and with $p$ the number of parameters in our model. In the case of height $p=2$, the two p-value are testing the null hypothesis that $\beta_0 = 0$ and $\beta_1=0$ respectively.
+
+**LSEs are correlated**
+
+```{r}
+lse %>% summarize(cor(beta_0, beta_1))
+```
+
+However, the correlation depends on how the predictors are defined or transformed.
+
+Here we standardize the father heights, which changes $x_i$ to $x_i - \bar{x}$.
+
+```{r}
+B <- 1000
+N <- 50
+lse <- replicate(B, {
+      sample_n(galton_heights, N, replace = TRUE) %>%
+      mutate(father = father - mean(father)) %>%
+      lm(son ~ father, data = .) %>% .$coef 
+})
+```
+
+Observe what happens to the correlation in this case:
+
+```{r}
+cor(lse[1,], lse[2,]) 
+```
+
+Standardizing the father's height dramatically reduces the correlation between the simulated $\beta$s.
+
+**Predicted Variables are Random Variables**
+
+The $\beta$s represent the factor by which the predicted variable changes based on the predictor. Similar to the true proportion of a population, we don't know the "true" $\beta$s, but we can estimate them from our sample data. These estimates are denoted with a hat: $\hat{\beta}$. For the Galton data, we have the following equation:
+
+$$\hat{Y} = \hat{\beta}_0 + \hat{\beta}_1 x$$
+If we assume that the errors are normal or N is large enough, we can also use theory to construct the confidence intervals. `ggplot` has a function within `geom_smooth(method = "lm")` that plots $\hat{Y}$ surrounded by the confidence interval.
+
+```{r}
+galton_heights %>% ggplot(aes(son, father)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+```
+
+The `predict` function returns the prediction from an `lm` object input. The confidence intervals can also be extracted.
+
+
+```{r}
+galton_heights %>% 
+  mutate(Y_hat = predict(lm(son ~ father, data = .))) %>%
+  ggplot(aes(father, Y_hat)) +
+  geom_line()
+```
+
+```{r}
+fit <- galton_heights %>% lm(son ~ father, data = .) 
+Y_hat <- predict(fit, se.fit = TRUE)
+names(Y_hat)
+```
+
+##Dataframes in the tidyverse
+
+###Tibbles
+Tibbles are a specialized type of dataframe that are always the output of functions such as `group_by` and `summarize` from the `tidyverse`. Base functions such as `lm` are not capable of reading tibbles grouped with `group_by` and thus provide the same output as would result from an ungrouped dataframe. 
+
+> Tibbles are the default dataframe of the tidyverse.
+
+Notably, `select`, `filter`, `mutate`, and `arrange` don't necessarily return tibbles. Rather, they preserve the class of the input.
+
+Tibbles have important differences from dataframes:
+1. Tibbles handle printing datasets with many columns and rows better than dataframes, showing a subset of the data and a description of the remaining rows and columns.
+2. Unlike dataframes, tibbles are always preserved when they are subset. Since most `tidyverse` functions require dataframes as input, this can eliminate the need to reclass subsetted dataframes.
+3. Tibbles will provide a warning if a column or row is called that does not exist, whereas dataframes will return a NULL. The warning is useful for debugging.
+4. While dataframes are limited to integers, Booleans, and strings, tibbles can contain more complex objects, such as functions.
+5. Tibbles can be grouped. The function `group_by` returns a grouped tibble, which tidyverse functions can understand and incorporate into their outputs (e.g. grouped outputs from `summarize`).
+
+###Bridging Base R to the Tidyverse with Do
+
+The `do` function serves as a bridge between base R functions such as `lm` and the `tidyverse`. `do` understands grouped tibbles and will always return a dataframe that can be piped into the `tidyverse` function. 
+
+If we return to our stratification of runs (R) and bases on balls (BB) by HRs for a moment, we can recall that the `lm` function does not understand grouped tibbles, and so does not return our desired output when we give it Rs and BBs grouped by HR strata. We can bridge the gap with the `do` function:
+
+```{r}
+dat <- Teams %>% filter(yearID %in% 1961:2001) %>%
+  mutate(HR = round(HR/G, 1), 
+         BB = BB/G,
+         R = R/G) %>%
+  select(HR, BB, R) %>%
+  filter(HR >= 0.4 & HR<=1.2) 
+```
+
+```{r}
+dat %>%
+  group_by(HR) %>%
+  do(fit = lm(R~BB, data = .))
+```
+Note that the output above has the HR strata in one column and the `lm` object outputs in another, which isn't very useful. Also, the column must be defined within `do` (i.e. `fit` above) else the output will not be a dataframe and `do` will return an error.
+
+To get a useful output, we need the output of `do` to be a dataframe. One way to accomplish this is to write a function that extracts the variables we want and puts them into a dataframe:
+
+```{r}
+get_slope <- function(data){
+  fit <- lm(R ~ BB, data = data)
+  data.frame(slope = fit$coefficients[2], 
+             se = summary(fit)$coefficient[2,2])
+}#function fits a linear model to the input and returns a dataframe with the slope and standard error
+``` 
+Then extracting the slope and standard error is as simple as grouping the data and plugging our function into `do`.
+
+```{r}
+dat %>%  
+  group_by(HR) %>%
+  do(get_slope(.))
+```
+
+*Note that we do not name the output of do.* This would cause slope and se to be put into dataframes within the tibble.
+
+Conveniently, `do` concatenates dataframe outputs that have multiple rows. If we wanted the Intercept and BB from our fit above, we could write the following code.
+
+```{r};
+get_lse <- function(data){
+  fit <- lm(R ~ BB, data = data)
+  data.frame(term = names(fit$coefficients),
+    slope = fit$coefficients, 
+    se = summary(fit)$coefficient[,2])
+}
+dat %>%  
+  group_by(HR) %>%
+  do(get_lse(.))
+```
+
+###Extracting from objects with Broom
+
+`Broom` has three main functions, each of which extracts information from an `lm` object and returns a dataframe. These functions are `tidy`, `glance`, and `augment`. 
+
+* `tidy` returns estimates and related information as a dataframe
+    + setting `conf.int` to TRUE adds columns with confidence intervals to the output
+* `augment` adds the results of the model to the original data. This includes predictions, residuals, and cluster   assignments
+* `glance` creates a concise one-row summary of the model $R^{2}$ and adjusted $R^{2}$
+
+For example, stringing together `tidy` and `do` efficiently constructs a dataframe from `lm` object outputs.
+
+```{r}
+library(broom)
+dat %>%  
+  group_by(HR) %>%
+  do(tidy(lm(R ~ BB, data = .), conf.int = TRUE))
+```
+
+The above can be plugged straight into `ggplot` to make a useful graph that confirms there are no significant differences between the slopes (corroborating the assumption for the linear model that the strength of the relationship between R and BB is independent of HR).
+
+```{r}
+dat %>%  
+  group_by(HR) %>%
+  do(tidy(lm(R ~ BB, data = .), conf.int = TRUE)) %>%
+  filter(term == "BB") %>%
+  select(HR, estimate, conf.low, conf.high) %>%
+  ggplot(aes(HR, y = estimate, ymin = conf.low, ymax = conf.high)) +
+  geom_errorbar() +
+  geom_point()
+```
+
+
+##Building a Better Offensive Metric for Baseball
+
+
+Our earlier exploration of the data on led us to this model to predict runs:
+$$
+\mbox{E}[R \mid BB = x_1, HR = x_2] = \beta_0 + \beta_1 x_1 + \beta_2 x_2
+$$
+
+We showed that the the data and each of the conditional distributions are approximately normal, justifying a linear model:
+
+$$
+Y_i = \beta_0 + \beta_1 x_1 + \beta_2 x_2 + \varepsilon_i
+$$
+
+with $Y_i$ runs per game, $x_1$ walks per game, and $x_2$ HRs per game. We plug both predictors into `lm` using the `+` operator.
+
+
+```{r}
+fit <- Teams %>% 
+  filter(yearID %in% 1961:2001) %>% 
+  mutate(BB = BB/G, HR = HR/G,  R = R/G) %>%  
+  lm(R ~ BB + HR, data = .)
+```
+
+`tidy` returns a readable summary.
+
+```{r}
+tidy(fit, conf.int = TRUE) 
+```
+
+
+If we want to construct a metric to pick players, we need to consider singles, doubles, and triples as well. Can we build a model that predicts runs based on all these outcomes? 
+
+Let's assume for the moment that all of these additional variables are jointly normal. This means that if we pick any one of them, and hold the other four fixed, the relationship with the outcome is linear and the slope does not depend on the four values held constant. If this is true, then a linear model for our data is:
+
+$$
+Y_i = \beta_0 + \beta_1 x_{i,1} + \beta_2 x_{i,2} + \beta_3 x_{i,3}+ \beta_4 x_{i,4} + \beta_5 x_{i,5} + \varepsilon_i
+$$
+
+with $x_1, x_2, x_3, x_4, x_5$ representing BB, singles, doubles, triples, and HR respectively. 
+
+To predict how many runs each team will score in the 2002 season, we use the data up through 2001. We fit the model based on the equation above and compare our predicted runs to the actual scores:
+```{r}
+fit <- Teams %>% 
+  filter(yearID %in% 1961:2001) %>% #filter to data before 2002
+  mutate(BB = BB/G, #create per game variables
+         singles = (H-X2B-X3B-HR)/G, 
+         doubles = X2B/G, 
+         triples =X3B/G, 
+         HR=HR/G,
+         R=R/G) %>%  
+  lm(R ~ BB + singles + doubles + triples + HR, data = .) #fit model based on selected variables
+
+Teams %>% 
+  filter(yearID %in% 2002) %>% #using the data from 2002 to find the actual runs
+  mutate(BB = BB/G, #create our variables
+         singles = (H-X2B-X3B-HR)/G, 
+         doubles = X2B/G, 
+         triples =X3B/G, 
+         HR=HR/G,
+         R=R/G)  %>% 
+  mutate(R_hat = predict(fit, newdata = .)) %>% #predict runs based on the other scores from 2002
+  ggplot(aes(R_hat, R, label = teamID)) + #plot
+  geom_point() + #plotting predicted and real values to assess accuracy
+  geom_text(nudge_x=0.1, cex = 2) + #add team names
+  geom_abline() #identity line
+```
+
+Clearly, our model does a pretty good job predicting the real results.
+
+To create a player-specific model, we need to adjust our metrics so that they approximate individuals rather than teams (since we've been using team-level statistics). We need to adjust by taking into account the "per plate appearance" rate, which controls for the different frequencies with which players get a chance to hit.
+
+
+To make the per-game team rate comparable to the per-plate-appearance player rate, we compute the average number of team plate appearances per game:
+
+```{r}
+pa_per_game <- Batting %>% filter(yearID == 2002) %>% 
+  group_by(teamID) %>%
+  summarize(pa_per_game = sum(AB+BB)/max(G)) %>% 
+  .$pa_per_game %>% 
+  mean
+```
+
+We compute the per-plate-appearance rates for players available in 2002 on data from 1999-2001. To avoid small sample artifacts, we filter players with few plate appearances. Here is the entire calculation in one line:
+
+```{r}
+players <- Batting %>% filter(yearID %in% 1999:2001) %>% 
+  group_by(playerID) %>%
+  mutate(PA = BB + AB) %>%
+  summarize(G = sum(PA)/pa_per_game,
+    BB = sum(BB)/G,
+    singles = sum(H-X2B-X3B-HR)/G,
+    doubles = sum(X2B)/G, 
+    triples = sum(X3B)/G, 
+    HR = sum(HR)/G,
+    AVG = sum(H)/sum(AB),
+    PA = sum(PA)) %>%
+  filter(PA >= 300) %>%
+  select(-G) %>%
+  mutate(R_hat = predict(fit, newdata = .))
+```
+
+The player specific predicted runs computed here can be interpreted as the number of runs we predict a team will score if all batters are exactly like that player. A histogram shows that there is wide variability across players:
+
+```{r}
+players %>% ggplot(aes(R_hat)) + 
+  geom_histogram(binwidth = 0.5, color = "black")
+```
+
+To actually construct the team, we'll need to know the salary of each player and their defensive position (since we can only have 1 of each). We also remove the position "OF", which denotes multiple positions in the outfield, and pitchers, who don't hit in the American League.
+
+```{r}
+players <- Salaries %>% #join players and salary datasets
+  filter(yearID == 2002) %>%
+  select(playerID, salary) %>%
+  right_join(players, by="playerID")
+players <- Fielding %>% filter(yearID == 2002) %>% #remove OF and P
+  filter(!POS %in% c("OF","P")) %>%
+  group_by(playerID) %>%
+  top_n(1, G) %>% #select most common position since some players have multiple
+  filter(row_number(G) == 1) %>% #choose first row for ties
+  ungroup() %>%
+  select(playerID, POS) %>%
+    right_join(players, by="playerID") %>% #join player stats to player IDs and position
+  filter(!is.na(POS)  & !is.na(salary)) #remove players with missing info
+players <- Master %>%
+  select(playerID, nameFirst, nameLast, debut) %>% # select 
+  right_join(players, by="playerID")
+```
+Lastly, we add each player's first and last name.
+```{r}
+players %>% select(nameFirst, nameLast, POS, salary, R_hat) %>% 
+  arrange(desc(R_hat)) %>% 
+  top_n(10) 
+```
+We can see clearly that players with higher metrics have higher salaries.
+```{r}
+players %>% ggplot(aes(salary, R_hat, color = POS)) + 
+  geom_point() +
+  scale_x_log10()
+```
+However, there are some players that have lower salaries for their metric -- they are a good choice!
+
+We can use linear programming to select sets of players that maximize the $\hat{R}$ metric within our 40 million dollar budget constraint.
+
+```{r}
+library(reshape2)
+library(lpSolve)
+
+players <- players %>% filter(debut <= 1997 & debut > 1988)
+constraint_matrix <- acast(players, POS ~ playerID, fun.aggregate = length)
+npos <- nrow(constraint_matrix)
+constraint_matrix <- rbind(constraint_matrix, salary = players$salary)
+constraint_dir <- c(rep("==", npos), "<=")
+constraint_limit <- c(rep(1, npos), 50*10^6)
+lp_solution <- lp("max", players$R_hat,
+                  constraint_matrix, constraint_dir, constraint_limit,
+                  all.int = TRUE) 
+```
+The algorithm selects the following players:
+
+```{r}
+our_team <- players %>%
+  filter(lp_solution$solution == 1) %>%
+  arrange(desc(R_hat))
+our_team %>% select(nameFirst, nameLast, POS, salary, R_hat)
+```
+Each of these players have above average BB and HR rates, but not singles:
+
+```{r}
+my_scale <- function(x) (x - median(x))/mad(x) #x - median/median absolute deviation
+players %>% mutate(BB = my_scale(BB), #scaling all metrics
+                   singles = my_scale(singles),
+                   doubles = my_scale(doubles),
+                   triples = my_scale(triples),
+                   HR = my_scale(HR),
+                   AVG = my_scale(AVG),
+                   R_hat = my_scale(R_hat)) %>%
+  filter(playerID %in% our_team$playerID) %>%
+  select(nameFirst, nameLast, BB, singles, doubles, triples, HR, AVG, R_hat) %>%
+  arrange(desc(R_hat))
+```
+
+###On Base Plus Slugging (OPS)
+
+Baseball statisticians (often called Sabermetricians) realized that walks were important and that singles, doubles, triples, and home runs should each be weighted more. The result was OPS which adds weights depending on bases achieved plus walks.
+
+$$
+\frac{\mbox{BB}}{\mbox{PA}} + \frac{\mbox{Singles} + 2 \mbox{Doubles} + 3 \mbox{Triples} + 4\mbox{HR}}{\mbox{AB}}
+$$
+This metric is impressively similar to the one generated from regression:
+
+```{r}
+Batting %>% 
+  filter(yearID %in% 1990:2001) %>% 
+  group_by(playerID, yearID) %>%
+  filter(BB + AB >= 300) %>%
+  mutate(PA = BB + AB, 
+         singles = (H-X2B-X3B-HR),
+         OPS = BB / PA + 
+           (singles + 2*X2B + 3*X3B + 4*HR)/AB,
+         G = PA/pa_per_game, 
+         BB = BB/G,
+         singles = singles/G,
+         doubles = X2B/G, 
+         triples = X3B/G,
+         HR = HR/G) %>%
+  ungroup() %>%
+  mutate(R_hat = predict(fit, newdata = .)) %>%
+  ungroup %>%
+  ggplot(aes(OPS, R_hat)) + 
+  geom_point()
+```
+It's clear that $\hat{R}$ and OPS are strongly correlated.
+
+##Regression Fallacy
+
+People often speak of a "sophomore slump" wherein a star first performance (e.g. a rookie year, an original movie) is followed up by a less impressive second, or sophomore, effort (e.g. a second season, a sequel). 
+
+In truth, there's no such thing as the sophomore slump. It's just a function of chance, specifically *regression to the mean*. The regression equation tells us that when two variables are imperfectly correlated, we would multiply the scaled $\hat{X}$ by the correlation coefficient (which is < 1) to find our $\hat{Y}$. 
+
+##Measurement Error Models
+
+For most linear models, we assume that each of the variable pairs are bivariate normal. In measurement error models, it is common to have a non-random covariate, such as time, and randomness is introduced from measurement error rather than sampling or natural variability.
+
+In this example of a measurement error model, we imagine that a ball is dropped and that the time and height is measured repeatedly as it falls. `dslabs` has a function that generates such a dataset.
+
+```{r}
+require(dslabs)
+falling_object <- rfalling_object()
+falling_object
+```
+
+A plot of the data reveals that it is parabolic in nature:
+
+```{r gravity, fig.cap="Simulated data for distance travelled versus time of falling object measured with error."}
+falling_object %>% 
+  ggplot(aes(time, observed_distance)) + 
+  geom_point() +
+  ylab("Distance in meters") + 
+  xlab("Time in seconds")
+```
+
+We can make our model based on the equation for parabolas (which includes a squared term):
+
+$$ f(x) = \beta_0 + \beta_1 x + \beta_2 x^2$$
+
+We can see that there is some measurement error in the model where the dots shift away from the parabola, so we must include an error term in our model:
+
+$$ Y_i = \beta_0 + \beta_1 x_i + \beta_2 x_i^2 + \varepsilon_i, i=1,\dots,n $$
+
+with $Y_i$ representing distance in meters, $x_i$ representing time in seconds, and $\varepsilon$ accounting for measurement error. The measurement error is assumed to be *random*, *independent from each other*, and *having the same distribution for each $i$*. We also assume that there is no bias, which means the expected value $\mbox{E}[\varepsilon] = 0$.
+
+Note that this is a linear model because it is a linear combination of known quantities, $x$ and $x^2$, and unknown parameters, $\beta_0$, $\beta_1$, and $\beta_2$. 
+We can use a least squares estimate to find the best values for the unknown parameters. The `lm` function will find the $\beta$s that minimize the residual sum of squares:
+ 
+Note: LSE calculations do not require the errors to be approximately normal.
+
+```{r}
+require(broom)
+fit <- falling_object %>% 
+  mutate(time_sq = time^2) %>% 
+  lm(observed_distance~time+time_sq, data=.)
+tidy(fit) 
+```
+
+We can check whether the parabolic regression function fits the data using `augment` to add it to our dataset and plot the corresponding regression curve.
+
+```{r}
+augment(fit) %>% 
+  ggplot() +
+  geom_point(aes(time, observed_distance)) + 
+  geom_line(aes(time, .fitted), col = "blue")
+```
+
+Of course, we know that the actual equation for a falling object is as follows:
+
+$$d = h_0 + v_0 t -  0.5 \times 9.8 t^2$$
+
+with $h_0$ and $v_0$ representing the starting height and velocity, respectively. The data we simulated above followed this equation and added measurement error to simulate `n` observations for dropping the ball $(v_0=0)$ from a random height. 
+
+These are consistent with the parameter estimates:
+
+```{r}
+tidy(fit, conf.int = TRUE)
+```
+
+Compare the confidence interval above to the initial height in the plot, and you'll find that the intercept ($\beta_0$) falls within it. The initial velocity is zero, and you can see the same for the confidence intervals for "time" ($\beta_1$). The coefficient for $\beta_2$ ought to be about 4.9 (see falling object equation), and we see that is indeed the case. 
+
+Note also that the p-value for "time" is larger than 0.05 since the p-value implies whether the initial value is significantly different from zero.
+
+# Correlation is not causation
+
+```{r}
+library(tidyverse)
+library(tidyr)
+library(broom)
+library(dslabs)
+ds_theme_set()
+```
+
+
+### Spurious correlation
+
+Not all correlations are meaningful. The following graph shows a strong correlation between divorce rates in Maine and per capita margarine consumption.
+
+```{r, echo=FALSE}
+the_title <- paste("Correlation =", 
+                round(with(divorce_margarine, 
+                           cor(margarine_consumption_per_capita, divorce_rate_maine)),2))
+data(divorce_margarine)
+divorce_margarine %>% 
+  ggplot(aes(margarine_consumption_per_capita, divorce_rate_maine)) + 
+  geom_point(cex=3) + 
+  geom_smooth(method = "lm") + 
+  ggtitle(the_title) +
+  xlab("Margarine Consumption per Capita (lbs)") + 
+  ylab("Divorce rate in Maine (per 1000)")
+```
+
+
+A Monte Carlo simulation can be used to show how high correlations can be selected from samples of uncorrelated variables. 
+```{r, cache=TRUE}
+N <- 25
+G <- 1000000
+sim_data <- tibble(group = rep(1:G, each = N), X = rnorm(N*G), Y = rnorm(N*G))
+```
+
+
+Next, we compute the correlation between `X` and `Y` for each group and look at the max:
+
+```{r}
+load("si_data_confounding.rda")
+res <- sim_data %>% group_by(group) %>% summarize(r = cor(X, Y)) %>% arrange(desc(r))
+res
+```
+
+The maximum correlation is `r max(res$r)`. Plotting that data provides ostensibly convinging evidence that $X$ and $Y$ are in fact correlated:
+
+```{r}
+sim_data %>% filter(group == res$group[which.max(res$r)]) %>%
+  ggplot(aes(X, Y)) +
+  geom_point() + 
+  geom_smooth(method = "lm")
+```
+
+The correlation coefficient is a random variable, and as we'd expect it's centered at 0, the expected value.
+
+```{r}
+res %>% ggplot(aes(x=r)) + geom_histogram(binwidth = 0.1, color = "black")
+```
+
+We just did enough simulations that a few will be highly correlated by chance. 
+
+Our maximum correlation group even has a low p-value:
+
+```{r}
+sim_data %>% 
+  filter(group == res$group[which.max(res$r)]) %>%
+  do(tidy(lm(Y ~ X, data = .)))
+```
+
+## Outliers
+
+Suppose we take measurements from two independent outcomes, $X$ and $Y$, and we standardize the measurements, forgetting to standarize just one: element 23.
+
+```{r}
+set.seed(1)
+x <- rnorm(100,100,1)
+y <- rnorm(100,84,1)
+x[-23] <- scale(x[-23])
+y[-23] <- scale(y[-23])
+```
+
+Plotting it, we see:
+
+```{r}
+tibble(x,y) %>% ggplot(aes(x,y)) + geom_point(alpha = 0.5)
+```
+
+The correlation is very strong:
+
+```{r}
+cor(x,y)
+```
+
+However, if we remove this outlier, the correlation is reduced to near zero (which is what it should be).
+
+```{r}
+cor(x[-23], y[-23])
+```
+
+One method for correlation that is robust to outliers is the *Spearman coefficient*.  This coefficient computes the correlation on the ranks of the values, rather than the values themselves. Here is a plot of the ranks plotted against each other:
+
+```{r}
+tibble(x,y) %>% 
+  ggplot(aes(rank(x),rank(y))) + 
+  geom_point(alpha = 0.5)
+```
+
+The outlier is now just the highest rank, and the correlation is robust:
+
+```{r}
+cor(rank(x), rank(y))
+```
+
+The `cor` function also has a method for the Spearman coefficient.
+
+```{r}
+cor(x, y, method = "spearman")
+```
+
+## Reversing cause and effect
+
+Association is confused with causation when the cause and effect are reversed. 
+We can easily construct an example of cause and effect reversal using the father and son height data. Fitting the model:
+
+$$X_i = \beta_0 + \beta_1 y_i + \varepsilon_i, i=1, \dots, N$$
+
+Here, $X_i$ the father height and $y_i$ the son height. After running the `lm` function, we get a significant result:
+
+```{r}
+library(HistData)
+data("GaltonFamilies")
+GaltonFamilies %>%
+  filter(childNum == 1 & gender == "male") %>%
+  select(father, childHeight) %>%
+  rename(son = childHeight) %>% 
+  do(tidy(lm(father ~ son, data = .)))
+```
+
+The model fits the data very well, but we know that the causal implication doesn't make sense. The model works, but it can still be misinterpreted.
+
+
+## Confounders
+
+Confounders are likely the most common culprits behind the confusion of association and causation. If $X$ and $Y$ are correlated, we call $Z$ a _confounder_ if changes in $Z$ causes changes in both $X$ and $Y$. 
+
+**Case Study: UC Berkeley admissions**
+
+Admission data from six U.C. Berkeley majors from the year 1973 showed that more men were being admitted than women: 44% men were admitted compared to 30% women. Here is the data:
+
+```{r}
+data(admissions)
+admissions
+```
+
+There's a clear difference in the acceptance rates between genders:
+
+```{r}
+admissions %>% group_by(gender) %>% 
+  summarize(percentage = 
+              round(sum(admitted*applicants)/sum(applicants),1))
+```
+
+A Chi-squared test clearly rejects the hypothesis that gender and admission are independent:
+
+```{r}
+admissions %>% group_by(gender) %>% 
+  summarize(total_admitted = round(sum(admitted/100*applicants)), 
+            not_admitted = sum(applicants) - sum(total_admitted)) %>%
+  select(-gender) %>% 
+  do(tidy(chisq.test(.)))
+```
+
+But closer inspection shows a paradoxical result. Here are the percent admissions by major:
+
+```{r}
+admissions %>% select(major, gender, admitted) %>%
+  spread(gender, admitted) %>%
+  mutate(women_minus_men = women - men)
+```
+
+Now, four out of the six majors favor women, and most of the differences are much smaller than the overall differences.
+
+The paradox is that analyzing the totals suggests a dependence between admission and gender, but when the data is grouped by major, this dependence seems to disappear.  What's going on? This actually can happen if an uncounted confounder is driving most of the variability.
+
+So let's define three variables: $X$ is 1 for men and 0 for women, $Y$ is 1 for those admitted and 0 otherwise, and $Z$ quantifies the selectivity of the major. A gender bias claim would be based on the fact that $\mbox{Pr}(Y=1 | X = x)$ is higher for $x=1$ then $x=0$. [AN: "then" or "than"?] However, $Z$ is an important confounder to consider. Clearly $Z$ is associated with  $Y$, as the more selective a major, the lower $\mbox{Pr}(Y=1 | Z = z)$. But is major selectivity $Z$ associated with gender $X$?
+
+One way to see this is to plot the total percent admitted to a major versus the percent of women that made up the applicants:
+
+```{r}
+admissions %>% 
+  group_by(major) %>% 
+  summarize(major_selectivity = sum(admitted*applicants)/sum(applicants),
+            percent_women_applicants = sum(applicants*(gender=="women")/sum(applicants))*100) %>%
+  ggplot(aes(major_selectivity, percent_women_applicants, label = major)) +
+  geom_text()
+```
+
+There seems to be association. The plot suggests that women were much more likely to apply to the two "hard" majors: gender and major's selectivity are confounded. Compare, for example, major B and major E. Major B is much harder to enter than major E and over 60% of applicants to major B were women while less than 30% of the applicants of major E were women. 
+
+
+### Confounding explained graphically
+
+The following plot shows the percent of applicants that were accepted by gender:
+
+```{r}
+admissions %>% 
+  mutate(percent_admitted = admitted*applicants/sum(applicants)) %>%
+  ggplot(aes(gender, y = percent_admitted, fill = major)) +
+  geom_bar(stat = "identity", position = "stack")
+```
+
+It also breaks down the acceptance rates by major: the size of the colored bars represents the percent of each major students were admitted to. This breakdown allows us to see that the majority of accepted men came from two majors: A and B. It also lets us see that few women applied to these majors. What the plot does **not** show us is the percent admitted by major. 
+
+
+### Average after stratifying
+
+In this plot, we can see that if we condition or stratify by major, and then look at differences, we control for the confounder and this effect goes away:
+
+```{r admission-by-major, fig.cap="Admission percentage by major for each gender."}
+admissions %>% 
+  ggplot(aes(major, admitted, col = gender, size = applicants)) +
+  geom_point()
+```
+
+Now we see that major by major, there is not much difference. The size of the dot represents the number of applicants, and explains the paradox: we see large red dots and small blue dots for the easiest majors, A and B.
+
+If we average the difference by major, we find that the percent ad actually 3.5% higher for women. [AN: "the percent ad"?]
+
+```{r}
+admissions %>%  group_by(gender) %>% summarize(average = mean(admitted))
+```
+
+
+# Simpson's Paradox 
+
+The case we have just covered is an example of Simpson's Paradox. It is called a paradox because we see the sign of the correlation of flip [AN: "of flip"?] when comparing the entire publication and specific strata. The following is an illustrative example. Suppose you have three variables $X$, $Y$ and $Z$. Here is a scatterplot of $Y$ versus $X$:
+
+```{r, echo=FALSE}
+N <- 100
+Sigma <- matrix(c(1,0.75,0.75, 1), 2, 2)*1.5
+means <- list(c(11,3), c(9,5), c(7,7), c(5,9), c(3,11))
+dat <- lapply(means, function(mu) 
+  MASS::mvrnorm(N, mu, Sigma))
+dat <- tbl_df(Reduce(rbind, dat)) %>% 
+  mutate(Z = as.character(rep(seq_along(means), each = N)))
+names(dat) <- c("X", "Y", "Z")
+dat %>% ggplot(aes(X,Y)) + geom_point(alpha = .5) +
+  ggtitle(paste("correlation = ", round(cor(dat$X, dat$Y), 2)))
+```
+
+You can see that $X$ and $Y$ are negatively correlated. However, once we stratify by $Z$ (shown in different colors), which we have not yet shown, another pattern emerges: [AN: two "shown"s; use synonym]
+
+```{r, echo=FALSE}
+means <- tbl_df(Reduce(rbind, means)) %>% setNames(c("x","y")) %>%
+  mutate(z = as.character(seq_along(means)))
+  
+corrs <- dat %>% group_by(Z) %>% summarize(cor = cor(X,Y)) %>% .$cor 
+
+dat %>% ggplot(aes(X, Y, color = Z)) + 
+  geom_point(show.legend = FALSE, alpha = 0.5) +
+  ggtitle(paste("correlations =",  paste(signif(corrs,2), collapse=" "))) +
+  annotate("text", x = means$x, y = means$y, label = paste("Z=", means$z), cex = 5)  
+```
+
+It is really $Z$ that is negatively correlated with $X$. If we stratify by $Z$, the $X$ and $Y$ are actually positively correlated:  [AN: missing graph or plot]
+
+
+
+### Gender contributes to personal research funding success in The Netherlands
+
+Let's examine a similar case to the UC Berkeley admissions example, but one which is much more subtle.
+
+A [2014 PNAS paper](http://www.pnas.org/content/112/40/12349.abstract) analyzed success rates from funding agencies in the Netherlands and concluded that their:
+
+> results reveal gender bias favoring male applicants over female applicants in the prioritization of their “quality of researcher” (but not "quality of proposal") evaluations and success rates, as well as in the language used in instructional and evaluation materials.
+
+The main evidence for this conclusion comes down to a comparison of the percentages. Table S1 in the paper includes the information we need:
+
+```{r,echo=FALSE}
+data("research_funding_rates")
+research_funding_rates
+```
+
+We can construct the two-by-two table used for the conclusion above:
+
+```{r}
+two_by_two <- research_funding_rates %>% 
+  select(-discipline) %>% 
+  summarize_all(funs(sum)) %>%
+  summarize(yes_men = awards_men, 
+            no_men = applications_men - awards_men, 
+            yes_women = awards_women, 
+            no_women = applications_women - awards_women) %>%
+  gather %>%
+  separate(key, c("awarded", "gender")) %>%
+  spread(gender, value)
+two_by_two
+```
+
+Compute the difference in percentage:
+
+```{r}
+two_by_two %>% mutate(men = round(men/sum(men)*100, 1), women = round(women/sum(women)*100, 1)) %>% filter(awarded == "yes")
+```
+
+Notice that it's lower for women, and find that it is almost statistically significant at the 0.05 level: [AN: who finds?]
+
+```{r}
+two_by_two %>% select(-awarded) %>% chisq.test() %>% tidy
+```
+
+So there appears to be some evidence of an association. But can we infer causation here? Is gender bias causing this observed difference?
+
+[A response](http://www.pnas.org/content/112/51/E7036.extract) was published a few months later titled _No evidence that gender contributes to personal research funding success in The Netherlands: A reaction to Van der Lee and Ellemers_  which concluded:
+
+> However, the overall gender effect borders on statistical significance, despite the large sample. Moreover, their conclusion could be a prime example of Simpson’s paradox; if a higher percentage of women apply for grants in more competitive scientific disciplines (i.e., with low application success rates for both men and women), then an analysis across all disciplines could incorrectly show "evidence" of gender inequality.
+
+
+In the UC Berkeley admissions example, the overall differences were explained by difference across disciplines. We use the same approach on the research funding data and look at comparisons by discipline:
+
+```{r}
+dat <- research_funding_rates %>% 
+  rename(success_total = success_rates_total,
+         success_men = success_rates_men,
+         success_women = success_rates_women) %>%
+  gather(key, value, -discipline) %>%
+  separate(key, c("type", "gender")) %>%
+  spread(type, value) %>%
+  filter(gender != "total") %>%
+  mutate(discipline = reorder(discipline, applications, sum)) 
+dat %>% 
+  ggplot(aes(discipline, success, size = applications, color = gender)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  geom_point()
+```
+
+Here we see that some fields favor men and other women. We see that the two fields with the largest difference favoring men, are also the fields with the most applications. However, are any of these differences statistically significant? Keep in mind that even when there is no bias, we will see differences due to random variability in the review process as well as random variability across candidates. If we perform a Fisher test in each discipline, we see that most differences result in p-values larger than 0.05.
+
+```{r}
+do_fisher_test <- function(m, x, n, y){
+  tab <- tibble(men = c(x, m-x), women = c(y, n-y))
+  tidy(fisher.test(tab)) %>% 
+    rename(odds = estimate) %>%
+    mutate(difference = y/n - x/m)
+}
+res <- research_funding_rates %>% 
+  group_by(discipline) %>%
+  do(do_fisher_test(.$applications_men, .$awards_men, 
+                    .$applications_women, .$awards_women)) %>%
+  ungroup() %>%
+  select(discipline, difference, p.value) %>%
+  arrange(difference)
+res 
+```
+
+For Earth/Life Sciences, there is a difference of 10% favoring men and this has a p-value of 0.04. But is this a spurious correlation? We performed 9 tests. Reporting only the one case with a p-value less than 0.05 would be an example of cherry picking. 
+
+The overall average of the difference is only -0.3%, which is much smaller than the standard error:
+
+```{r}
+res %>% summarize(overall_avg = mean(difference), 
+                  se = sd(difference)/sqrt(n()))
+```
+
+Furthermore, the differences appear to follow a normal distribution:
+
+```{r}
+res %>% ggplot(aes(sample = scale(difference))) + stat_qq() + geom_abline()
+```
+
+which suggests the possibility that the observed differences are just due to chance. 
+
+
+
+

@@ -1,6 +1,10 @@
 ---
 title: "R Probability Course"
 output:
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
+  header_includes: \DeclareUnicodeCharacter{00A0}{ }
   html_notebook:
     theme: cerulean
     toc: yes
@@ -14,6 +18,13 @@ output:
     toc_float:
       collapsed: no
 ---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8,
+     warning=FALSE, message=FALSE)
+library(tidyverse)
+library(dslabs)
+```
 
 ##Discrete Probability
 
@@ -216,11 +227,11 @@ plot(df$group_size,df$prob)
 
 Now let's generate the graph again by calculating the exact probabilities. We'll do this backwards by calculating the probability that a person does not have the same birthday, and then using the `multiplication rule`.
 
-$Pr(person 1 has unique birthday) = 1$
+**Pr(person 1 has unique birthday) = 1**
 
-$Pr(person 2 has unique birthday | Pr(person 1 has unique birthday)) = 364/365$
+**Pr(person 2 has unique birthday | Pr(person 1 has unique birthday)) = 364/365**
 
-$Pr(person 3 has unique birthday | Pr(person 1 & 2 have unique birthdays)) = 363/365$
+**Pr(person 3 has unique birthday | Pr(person 1 & 2 have unique birthdays)) = 363/365**
 
 Using the `multiplication rule`, we see that the probability that everybody's birthday is unique is multiplied by $\frac{365 - (n-1)}{365}$ for the nth person in the group.
 
@@ -261,17 +272,17 @@ Not how as `B` gets larger, the estimate begins to stabilize. We can be more con
 
 ###Addition Rule
 
-$Pr(A | B) = Pr(A) + Pr(B) - Pr(A & B)$
+**Pr(A | B) = Pr(A) + Pr(B) - Pr(A & B)**
 
 Note that we subtract the probability of both occuring because that is contained within the first two terms.
 
 For the facecard example, the probability of drawing an ace and then a facecard is:
 
-$\frac{1}{13} * \frac{16}{51} = \frac{16}{663} = 0.24..$
+$$\frac{1}{13} * \frac{16}{51} = \frac{16}{663} = 0.24..$$
 
 and the probability of drawing a facecard and then an ace is:
 
-$\frac{16}{52} * \frac{4}{51} = \frac{64}{2652} = 0.024..$
+$$\frac{16}{52} * \frac{4}{51} = \frac{64}{2652} = 0.024..$$
 
 Note that these are the same, which makes sense given the symmetry of the choices.
 
@@ -750,6 +761,7 @@ However, for this to be true the X's must be independent draws (e.g. in our case
 ```{r}
 p <- 0.04
 x <- 0.05*180000
+B <- 10000
 profit_adj <- replicate(B, {
   new_p <- 0.04 + sample(seq(-0.01, 0.01, length.out = 100), 1)
   draws <- sample(c(x,loss_per_foreclosure), n, replace = TRUE, prob = c(1-new_p, new_p))

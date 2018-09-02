@@ -1,6 +1,9 @@
 ---
 title: "Productivity Tools Course"
 output:
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
   html_notebook:
     theme: spacelab
     toc: yes
@@ -17,6 +20,10 @@ output:
 
 ###Using Unix
 
+**Recommended Directory Structure**
+
+![](Directory Structure.png) 
+
 **The Terminal**
 
 Access a terminal window in R via Tools > Terminal > New Terminal.
@@ -26,10 +33,6 @@ The following function can be run in the terminal screen which returns the strin
 `echo "hello world"`
 
 *hello world*
-
-**Recommended Directory Structure**
-
-![](Directory Structure.png) 
 
 
 ###Unix Commands
@@ -130,7 +133,7 @@ R markdown documents are useful because they combine code and text into the same
   
 ###Git and GitHub
 
-The following barely scratches the surface on using Git and Github. Checkout these resources for more information:
+* The following barely scratches the surface on using Git and Github. Checkout these resources for more information:
     + Codeacademy
     + GitHub Guides
     + Try Git Tutorial

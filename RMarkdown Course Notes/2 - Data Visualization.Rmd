@@ -1,6 +1,9 @@
 ---
 title: "R Data Visualization Course"
 output:
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
   html_notebook:
     theme: cerulean
     toc: yes
@@ -14,9 +17,16 @@ output:
     toc_float:
       collapsed: no
 ---
+\newpage
 ##Intro to Plotting 
 
-```{r}
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8,
+     warning=FALSE, message=FALSE)
+```
+
+```{r, echo = FALSE, message = FALSE, warning= FALSE}
+
 require(knitr)
 require(dslabs)
 require(ggplot2)
@@ -41,20 +51,26 @@ $$ F(a) = Pr(x \le a) $$
 We can create a plot to demonstrate what this looks like for heights. 
 
 ```{r}
-plot(ecdf(heights$height), xlab = "Height", ylab = "Frequency", main = "CDF Plot of Heights")
+plot(ecdf(heights$height), xlab = "Height", 
+     ylab = "Frequency", 
+     main = "CDF Plot of Heights")
 
 ```
 
 To better see whether the data are symmetric and where they are centered, we can use a histogram. Note that bin widths can be adjusted.
 
 ```{r}
-hist(heights$height, main = "Histogram of Heights", xlab = "Heights (in)")
+hist(heights$height, 
+     main = "Histogram of Heights", 
+     xlab = "Heights (in)")
 ```
 
 It is also possible to create a smooth density plot from the histogram that makes the distribution simpler and easier to compare.
 
 ```{r}
-plot(density(heights$height), main = "Density Plot of Heights", xlab = "Heights")
+plot(density(heights$height), 
+     main = "Density Plot of Heights", 
+     xlab = "Heights")
 ```
 
 ###The Normal Distribution
@@ -64,9 +80,8 @@ The normal distribution (aka Gaussian distribution) is defined by the following 
 $$ Pr (a < x < b) = \int_a^b \frac{1}{\sqrt{2\pi} s} e^{-\frac{1}{2}(\frac{x-m}{s})^2} dx $$
 Here's the LateX code:
 
-```{r, error=FALSE}
-#Pr (a < x < b) = \int_a^b \frac{1}{\sqrt{2\pi} s} e^{-\frac{1}{2}(\frac{x-m}{s})^2} dx
-```
+    Pr (a < x < b) = \int_a^b \frac{1}{\sqrt{2\pi} s}                                   e^{-\frac{1}{2}(\frac{x-m}{s})^2} dx
+
 
 We define the **standard unit** as:
 
@@ -296,7 +311,8 @@ With the average rate, we can create a line with abline().
 
 ```{r}
 require(dplyr)
-r <- murders %>% summarize(rate = sum(total)/ sum(population) * 10^6) %>% .$rate
+r <- murders %>% summarize(rate = sum(total)/ sum(population) * 10^6) %>% 
+  .$rate
 p + geom_abline(intercept = log10(r), lty = 2, color = "darkgrey") + 
   geom_point(aes(col = region), size = 3) + 
   scale_color_discrete(name = "Region")
@@ -343,12 +359,17 @@ q + geom_density(fill = "blue") +
 To make a qq plot, we must change the definition of *q* so that qq can find *samples*. By default the qq plot is made by comparing to a theoretical normal distribution with an average of **0** and standard deviation of **1**. To compare to normal with the same parameter, we must define the *dparams* argument of *geom_qq()*. Alternatively, one could *scale()* the heights in the *aes* argument of *ggplot* to put the data in standard units. This is a bit cleaner.
 
 ```{r}
-params <- heights %>% filter(sex == "Male") %>% summarize(mean = mean(height), sd = sd(height))
-qq <- heights %>% filter(sex == "Male") %>% ggplot(aes(sample = height))
-qqplot <- qq + geom_qq(dparams = params) + ggtitle("Q-Q Plot of Male Heights") + geom_abline()
+params <- heights %>% filter(sex == "Male") %>% 
+  summarize(mean = mean(height), sd = sd(height))
+qq <- heights %>% filter(sex == "Male") %>% 
+  ggplot(aes(sample = height))
+qqplot <- qq + geom_qq(dparams = params) + 
+  ggtitle("Q-Q Plot of Male Heights") + geom_abline()
 #alternative, cleaner method
-qq_2 <- heights %>% filter(sex == "Male") %>% ggplot(aes(sample = scale(height)))
-qq_scale <- qq_2 + geom_qq() + geom_abline() + ggtitle("Q-Q Plot of Male Heights")
+qq_2 <- heights %>% filter(sex == "Male") %>% 
+  ggplot(aes(sample = scale(height)))
+qq_scale <- qq_2 + geom_qq() + geom_abline() + 
+  ggtitle("Q-Q Plot of Male Heights")
 qqplot
 ```
 
@@ -388,7 +409,9 @@ data(murders)
 Let's compute the average and the standard deviation for the males in the heights dataset. Note that the output of `summarize()` is a dataframe. 
 
 ```{r}
-s<- heights %>% filter(sex == "Male") %>% summarize(average = mean(height), standard_deviation = sd(height))
+s<- heights %>% filter(sex == "Male") %>% 
+  summarize(average = mean(height), 
+            standard_deviation = sd(height))
 s
 ```
 
@@ -414,7 +437,8 @@ Note that we could also generate these same values using `quantile(c(0,0,5,1))` 
 Let's say we want to calculate the average US murder rate per 100,000 people. We can do this with `summarize()`. 
 
 ```{r}
-us_murder_rate <- murders %>% summarize(rate = sum(total)/sum(population)*100000)
+us_murder_rate <- murders %>% 
+  summarize(rate = sum(total)/sum(population)*100000)
 us_murder_rate
 ```
 The object `us_murder_rate` has class `class(us_murder_rate)`. This can cause problems down the road if we want to use enter `us_murder_rate` into a function that requires a *numeric* data type.
@@ -422,7 +446,8 @@ The object `us_murder_rate` has class `class(us_murder_rate)`. This can cause pr
 The **dot placeholder** is a useful way to define a numeric object at the end of a pipe.
 
 ```{r}
-us_murder_rate <- murders %>% summarize(rate = sum(total) / sum(population) * 100000) %>% .$rate
+us_murder_rate <- murders %>% 
+  summarize(rate = sum(total) / sum(population) * 100000) %>% .$rate
 us_murder_rate
 ```
 Now, `us_murder_rate` is of class `class(us_murder_rate)`. Later, we will see other instances where the dot is useful, but for now, we'll only use it to produce numeric vectors from pipelines constructed with `dplyr`.
@@ -458,7 +483,8 @@ murders %>% arrange(population) %>% head()
 If we wanted to arrange by the murder rate, let's first add a column to **murders**, and then arrange by rate.
 
 ```{r}
-murders <- murders %>% mutate(rate = total/population * 100000) 
+murders <- murders %>% 
+  mutate(rate = total/population * 100000) 
 murders %>% arrange(rate) %>% head()
 ```
 
@@ -471,7 +497,7 @@ murders %>% arrange(desc(rate)) %>% head()
 To do *nested sorting*, we can use a second argument in `arrange()`.
 
 ```{r}
-murders %>% arrange(region,desc(rate))
+murders %>% arrange(region,desc(rate)) %>% head(20)
 ```
 
 We've been using `head()` to show the first 6 rows of the tables above, but we can also use another dplyr function, `top_n`, to show the first `n` rows. To see the top ten highest murder rates, we first arrange by murder rate, and then show the top 10 rows.
@@ -511,7 +537,8 @@ col_a <- gapminder %>%
   filter(year == 2015 & country %in% c("Sri Lanka", "Poland", "Malaysia", "Pakistan", "Thailand")) %>%
   select(country, infant_mortality)
 col_b <- gapminder %>% 
-  filter(year == 2015 & country %in% c("Turkey", "South Korea", "Russia", "Vietnam", "South Africa")) %>%
+  filter(year == 2015 & country %in% 
+      c("Turkey", "South Korea", "Russia", "Vietnam", "South Africa")) %>%
   select(country, infant_mortality)
 table_1 <- data_frame(Country_A = col_a$country, Infant_Mortality_A = col_a$infant_mortality, Country_B = col_b$country, Infant_Mortality_B = col_b$infant_mortality)
 table_1
@@ -526,6 +553,7 @@ filter(gapminder, year == 1962) %>%
   ggplot(aes(fertility, life_expectancy, color = continent)) +
   geom_point()
 ```
+
 Note how there does seem to be two major groups. One in the top left corner composed of countries with a high life expectancy, and the other in the bottom right with shorter lifespans and more children. The first group is largely made up of European countries while the latter is primarily African and Asian.
 
 To see how this has changed over the last ~50 years, we can use the `facet_grid()` function to juxtapose scatterplots for each of the intervening years.
@@ -627,6 +655,7 @@ gapminder %>%
 Let's compare a few different time points:
 
 ```{r}
+past_year <- 1970
 country_list_1 <- gapminder %>% filter(year == past_year & !is.na(dpd)) %>% .$country
 country_list_2 <- gapminder %>% filter(year == 2010 & !is.na(dpd)) %>% .$country
 country_list <- intersect(country_list_1, country_list_2)
@@ -694,11 +723,6 @@ gapminder %>%
 Note that we adjusted the `bw` argument to make smooth the plot, `alpha` to make the two density plots translucent, and `facet_grid` to make the 1970 and 2010 plots appear.
 
 We noticed in the exploratory data anaylsis that many of the countries that saw the most dramatic change are in Asia. Let's use a new function, `case_when`, to show each region separately.
-
-```{r}
-gapminder %>% 
-  
-```
 
 ```{r}
 gapminder %>%
@@ -865,10 +889,14 @@ A useful to encode variables after the first two with different features of poin
 
 ###Case Study: Vaccines
 
+Let's look at vaccine data in the US in the last hundred years. 
 ```{r}
 data(us_contagious_diseases)
 str(us_contagious_diseases)
 ```
+
+Let's look at measles rates overall in the US over the last century:
+
 ```{r}
 the_disease <- "Measles"
 dat <- us_contagious_diseases %>% 
@@ -881,6 +909,8 @@ dat %>% filter(state == "California") %>%
   geom_vline(xintercept = 1963, col ="blue")
 ```
 
+We can create a tile plot showing measles rates by states. Rates decline substantially when vaccines are introduced:
+
 ```{r}
 library(RColorBrewer)
 dat %>% ggplot(aes(year, state, fill = rate)) +
@@ -891,16 +921,6 @@ dat %>% ggplot(aes(year, state, fill = rate)) +
   theme_minimal() + theme(panel.grid = element_blank()) +
   ggtitle(the_disease) +
   ylab("") + xlab("")
-```
-
-```{r}
-avg_dis <- us_contagious_diseases %>% filter(disease == the_disease) %>% 
-  group_by(year) %>%
-  summarize(us_rate = sum(count, na.rm = TRUE)/sum(population, na.rm = TRUE)*10000)
-dat %>%
-  ggplot(aes(year, rate)) +
-  geom_line() + ylab("Cases Per 10,000") +
-  geom_vline(xintercept = 1963, col ="blue")
 ```
 
 ###Avoid 3D Plots
