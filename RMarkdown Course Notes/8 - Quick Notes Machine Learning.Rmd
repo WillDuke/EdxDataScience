@@ -1,0 +1,324 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+**
+
+
+```{r}
+install.packages("tidyverse")
+library(tidyverse)
+require(caret)
+require(magrittr)
+install.packages("dslabs")
+library(dslabs)
+data(heights)
+y <- heights$sex
+x <- heights$height
+#define training and test sets with random index
+test_index <- createDataPartition(y, times = 1, p = 0.5, list = FALSE)
+train_set <- heights[-test_index, ]
+test_set <- heights[test_index, ]
+```
+overall accuracy: proportion of correct predictions
+
+```{r}
+y_hat <- sample(c("Male", "Female"), length(test_index), replace = TRUE) %>% 
+  factor(levels = levels(test_set$sex))
+mean(y_hat == test_set$sex)
+```
+```{r}
+mnist <- read_mnist()
+y <- mnist$train$labels
+y[5] + y[6]
+y[5] > y[6]
+
+class(y)
+```
+
+confusion matrix: comparison of predicted outcomes with actual outcomes
+
+TP: true positive
+FP: false positive
+TN: true negative
+FN: false negative
+
+sensitivity: does Y_hat = 1 when Y = 1? -- TP/(TP + FN) (true positives/total positives)
+  - aka true positive rate or recall
+specificity: does Y_hat = 0 when Y = 0? -- TN/(TN + FP) (true negatives/total negatives)
+  - or positive predictive value: TP/(TP + FP) (true positives over all predicted positives)
+  
+```{r}
+t <- confusionMatrix(data = y_hat, reference = test_set$sex)
+```
+
+balanced accuracy: average of sensitivity and specificity
+F1 score (harmonic average): 1/ 0.5(1/recall + 1/precision) or 2* precision x recall / (precision + recall)
+weighted F1 score: weight toward specificity or sensitivity with beta:
+1/ (beta^2/(1+ beta^2) * 1/recall + (beta^2/(1+ beta^2) * 1/precision -- F_meas in caret, beta default is 1
+```{r}
+cutoff <- seq(61,70)
+F_1 <- map_dbl(cutoff, function(x){
+  y_hat <- ifelse(train_set$height > x, "Male", "Female") %>% factor(levels = levels(train_set$sex))
+  F_meas(data = y_hat, reference = factor(train_set$sex))
+})
+plot(cutoff, F_1)
+max(F_1)
+??caret
+```
+
+
+receiving operator characteristic (ROC) curve: plots sensitivity (true positive rate) vs 1 - specificity or the false positive rate
+ROC curve always looks like the identity line
+a sharper curve means a more accurate algorithm -- higher sensitivity while retaining specificity
+
+```{r}
+#ROC curve
+cutoffs <- seq(61,70)
+height_cutoff <- map_df(cutoffs, function(x){
+  y_hat <- ifelse(train_set$height > x, "Male", "Female") %>% 
+    factor(levels = levels(train_set$sex))
+  list(method = "Height Cutoff", 
+       FPR = 1-specificity(y_hat, test_set$sex),
+       TPR = sensitivity(y_hat, test_set$sex))
+})
+plot(height_cutoff$FPR, height_cutoff$TPR)
+#precision recall curves -- in cases where prevalence matters
+
+prob <- seq(0.4, 0.8, by = 0.05)
+guessing <- purrr::map_df(prob, function(p){
+  y_hat <- sample(c("Male", "Female"), length(test_index), replace = TRUE, prob = c(p, 1 - p)) %>%
+  factor(levels = levels(test_set$sex))
+  list(method = "Guess", 
+       recall = sensitivity(y_hat, test_set$sex),
+       precision = precision(y_hat, test_set$sex))
+})
+
+cutoffs <- seq(61,70)
+height_cutoff_pr <- map_df(cutoffs, function(x){
+  y_hat <- ifelse(train_set$height > x, "Male", "Female") %>% 
+    factor(levels = levels(train_set$sex))
+  list(method = "Height Cutoff", 
+       recall = sensitivity(y_hat, test_set$sex),
+       precision = precision(y_hat, test_set$sex))
+})
+?plot
+plot(height_cutoff_pr$recall, height_cutoff_pr$precision, type = "l", ylim = c(0, 1))
+plot(guessing$recall, guessing$precision, type = "l", ylim = c(0,1))
+```
+
+
+
+```{r}
+library(dslabs)
+library(dplyr)
+library(lubridate)
+
+data("reported_heights")
+
+dat <- mutate(reported_heights, date_time = ymd_hms(time_stamp)) %>%
+  filter(date_time >= make_date(2016, 01, 25) & date_time < make_date(2016, 02, 1)) %>%
+  mutate(type = ifelse(day(date_time) == 25 & hour(date_time) == 8 & between(minute(date_time), 15, 30), "inclass","online")) %>%
+  select(sex, type)
+
+y <- factor(dat$sex, c("Female", "Male"))
+x <- dat$type
+length(y)
+length(x[x == "online"])
+mean(y == "Female")
+inclass_index <- x == "inclass"
+length(y[-inclass_index])
+sum(y[inclass_index] == "Female")
+mean(y[!inclass_index] == "Female")
+67/149
+42/111
+
+
+y_hat <- ifelse(x == "inclass", "Female", "Male") %>% factor(levels = levels(y))
+table(y, y_hat)
+confusionMatrix(data = y_hat, reference = y)
+sum(dat$sex == "Female")
+```
+
+
+
+```{r}
+library(caret)
+library(dslabs)
+data(iris)
+iris <- iris[-which(iris$Species=='setosa'),]
+iris$Species <- factor(iris$Species, levels = c("versicolor", "virginica"))
+
+set.seed(2)
+test_index <- createDataPartition(iris,times=1,p=0.5,list=FALSE)
+test <- iris[test_index,]
+train <- iris[-test_index,]
+length(train$Sepal.Length)
+cutoffs <- mean(iris$Sepal.Length)
+
+cutoff <- seq(min(train$Petal.Length), max(train$Petal.Length), by = 0.1)
+SepalLength <- map_dbl(cutoff, function(x){
+  y_hat <- ifelse(train$Petal.Length > x, "versicolor", "virginica") %>% 
+    factor(levels = levels(train$Species))
+  confusionMatrix(data = y_hat, reference = train$Species)[["overall"]][["Accuracy"]]
+}) %>% as.data.frame() %>% mutate(cutoff = cutoff)
+cutoff <- seq(mean(train$Sepal.Width) - 3*sd(train$Sepal.Width),mean(train$Sepal.Width) + 3*sd(train$Sepal.Width), by = sd(train$Sepal.Width)/2)
+SepalWidth <- map_df(cutoff, function(x){
+  y_hat <- ifelse(train$Sepal.Width > x, "versicolor", "virginica") %>% 
+    factor(levels = levels(train$Species))
+  list(name = "Sepal Width", 
+       accuracy = sum(y_hat == train$Species)/length(train$Species))
+})
+cutoff <- seq(mean(train$Petal.Length) - 3*sd(train$Petal.Length),mean(train$Petal.Length) + 3*sd(train$Petal.Length), by = sd(train$Petal.Length)/4)
+PetalLength <- map_df(cutoff, function(x){
+  y_hat <- ifelse(train$Petal.Length > x, "versicolor", "virginica") %>% 
+    factor(levels = levels(train$Species))
+  list(name = "Petal Length", 
+       accuracy = sum(y_hat == train$Species)/length(train$Species))
+})
+mean(train$Sepal.Length)
+min(train$Sepal.Length)
+summary(train$Sepal.Length)
+cutoff <- seq(mean(train$Petal.Width) - 3*sd(train$Petal.Width),mean(train$Petal.Width) + 3*sd(train$Petal.Width), by = sd(train$Petal.Width)/4)
+PetalWidth <- map_df(cutoff, function(x){
+  y_hat <- ifelse(train$Petal.Width > x, "versicolor", "virginica") %>% 
+    factor(levels = levels(train$Species))
+  list(name = "Petal Length", 
+       accuracy = sum(y_hat == train$Species)/length(train$Species))
+})
+train$Species
+mean(train$Petal.Width[train$Species == "versicolor"])
+mean(train$Petal.Width[train$Species == "virginica"])
+plot(SepalLength$precision, SepalLength$recall)
+length(test$Sepal.Length)
+length(train$Sepal.Length)
+sepal_accuracy <- function(col, cutoffs){
+  map_dbl(cutoffs, function())
+  y_hat <- ifelse(col > x, "versicolor", "virginica") %>% 
+    factor(levels = c("versicolor", "virginica"))
+  list(method = "Cutoff", 
+       FPR = 1-specificity(y_hat, test$Species),
+       TPR = sensitivity(y_hat, test$Species))
+}
+
+sepal_accuracy(train$Sepal.Length, cutoff)
+cutoff = 5
+check_accuracy(cutoff)
+map
+train %>% 
+  ggplot(aes(Species, Petal.Width)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.1)
+?geom_jitter
+```
+
+
+
+
+```{r}
+check_accuracy <- function(col){
+  cutoff <- seq(mean(col) - 3*sd(col),mean(col) + 3*sd(col), by = sd(col)/4)
+  guesses <- map_dbl(cutoff, function(x){
+    y_hat <- ifelse(col > x, "versicolor", "virginica") %>% 
+    factor(levels = c("versicolor", "virginica"))
+    sum(y_hat == train$Species)/length(train$Species)
+  })
+  max(guesses)
+}
+
+```
+
+```{r}
+library(caret)
+library(dslabs)
+data(iris)
+iris <- iris[-which(iris$Species=='setosa'),]
+
+set.seed(2)
+test_index <- createDataPartition(iris,times=1,p=0.5,list=FALSE)
+test <- iris[test_index,]
+train <- iris[-test_index,]
+
+iris$Species <- factor(iris$Species, levels = c("versicolor", "virginica"))
+
+
+
+cutoffs <- seq(min(train$Sepal.Length), max(train$Sepal.Length), by = 0.2)
+SepalLength <- map_df(cutoffs, function(x){
+  y_hat <- ifelse(train$Sepal.Length > x, "virginica", "versicolor") %>% 
+    factor(levels = c("versicolor", "virginica"))
+  list(method = "Sepal Length",
+       recall = sensitivity(y_hat, train$Species),
+    precision = precision(y_hat, train$Species))
+})
+mean(train$Petal.Length[train$Species == "versicolor"])
+cutoffs <- seq(min(train$Petal.Length), max(train$Petal.Length), by = 0.1)
+PetalLength <- map_df(cutoffs, function(x){
+  y_hat <- ifelse(train$Petal.Length > x, "virginica", "versicolor") %>% 
+    factor(levels = c("versicolor", "virginica"))
+  list(method = "Petal Length",
+       recall = sensitivity(y_hat, train$Species),
+    precision = precision(y_hat, train$Species))
+})
+PetalLength <- map_df(cutoffs, function(x){
+  y_hat <- ifelse(train$Petal.Length > x, "virginica", "versicolor") %>% 
+    factor(levels = c("versicolor", "virginica"))
+  list(method = "Petal Length",
+       recall = sensitivity(y_hat, train$Species),
+    precision = precision(y_hat, train$Species),
+    accuracy = confusionMatrix(y_hat, train$Species)[["overall"]][["Accuracy"]])
+})
+max(PetalLength$accuracy)
+bind_rows(PetalLength, SepalLength) %>%
+  ggplot(aes(recall, precision, color = method)) +
+  geom_line() +
+  geom_point()
+
+```
+A = p(disease) = 0.02
+B = p(test+) = 0.115
+P(B|A) = 0.85
+P(A|B) = P(B|A)*P(A)/P(B) = P(test+|disease) P(disease)/P(test+
+
+```{r}
+set.seed(1)
+disease <- sample(c(0,1), size=1e6, replace=TRUE, prob=c(0.98,0.02))
+test <- rep(NA, 1e6)
+test[disease==0] <- sample(c(0,1), size=sum(disease==0), replace=TRUE, prob=c(0.90,0.10))
+test[disease==1] <- sample(c(0,1), size=sum(disease==1), replace=TRUE, prob=c(0.15, 0.85))
+mean(disease[test==1])/0.02
+mean(test[disease==0])
+```
+```{r}
+library(dslabs)
+data("heights")
+heights %>% 
+	mutate(height = round(height)) %>%
+	group_by(height) %>%
+	summarize(p = mean(sex == "Male")) %>%
+	qplot(height, p, data =.)
+```
+
+```{r}
+ps <- seq(0, 1, 0.1)
+heights %>% 
+	mutate(g = cut(height, quantile(height, ps), include.lowest = TRUE)) %>%
+	group_by(g) %>%
+	summarize(p = mean(sex == "Male"), height = mean(height)) %>%
+	qplot(height, p, data =.)
+
+```
+```{r}
+set.seed(1)
+n <- 100
+Sigma <- 9*matrix(c(1.0, 0.5, 0.5, 1.0), 2, 2)
+dat <- MASS::mvrnorm(n = 100, c(69, 69), Sigma) %>%
+	data.frame() %>% setNames(c("x", "y")) %>% data.frame()
+train_set <- createDataPartition(dat$y, times = 1, p = 0.5, list = FALSE)
+train = dat[train_set,]
+test = dat[-train_set,]
+fit = lm(train$y ~ train$x, train)
+predict(fit, newdata = test)
+```
+

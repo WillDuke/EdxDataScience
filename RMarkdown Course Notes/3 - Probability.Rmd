@@ -22,8 +22,9 @@ output:
 ```{r global_options, include=FALSE}
 knitr::opts_chunk$set(fig.width=12, fig.height=8,
      warning=FALSE, message=FALSE)
-library(tidyverse)
+library(ggalt)
 library(dslabs)
+library(dplyr)
 ```
 
 ##Discrete Probability
@@ -115,13 +116,13 @@ mean(deck %in% kings)
 library(gtools)
 ```
 
-
 In the `gtools` package, `permutations` computes for any list of size `n` all the different ways we can select `r` items.
 
 For example, here are all the ways we can select two items from a list of 5.
 
-```{r}
+```{r, results = FALSE}
 permutations(5,2)
+
 ```
 
 Let's say we want to create 5 different random phone numbers. The following code produces all possible 7-digit phone numbers (without repeats), selects 5 at random, and presents them in a table.
